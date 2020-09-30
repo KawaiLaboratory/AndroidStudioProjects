@@ -4,6 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="#FFFFFF"
     tools:context=".MainActivity">
 
     <LinearLayout
@@ -42,8 +43,8 @@
             android:layout_height="wrap_content"
             android:ems="10"
             android:hint="@string/email"
-            android:inputType="textEmailAddress"
-            android:importantForAutofill="no" />
+            android:importantForAutofill="no"
+            android:inputType="textEmailAddress" />
 
         <Space
             android:layout_width="match_parent"
@@ -55,8 +56,8 @@
             android:layout_height="wrap_content"
             android:ems="10"
             android:hint="@string/password"
-            android:inputType="textPassword"
-            android:importantForAutofill="no" />
+            android:importantForAutofill="no"
+            android:inputType="textPassword" />
 
         <Space
             android:layout_width="match_parent"
@@ -68,8 +69,8 @@
             android:layout_height="wrap_content"
             android:ems="10"
             android:hint="@string/name"
-            android:inputType="textPersonName"
-            android:importantForAutofill="no" />
+            android:importantForAutofill="no"
+            android:inputType="textPersonName" />
 
         <Space
             android:layout_width="match_parent"
