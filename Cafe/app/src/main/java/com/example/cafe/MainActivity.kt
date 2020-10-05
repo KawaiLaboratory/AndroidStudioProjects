@@ -17,17 +17,21 @@ import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.github.kittinunf.fuel.core.FuelError
+import com.github.kittinunf.fuel.core.Request
+import com.github.kittinunf.fuel.core.Response
+import com.github.kittinunf.fuel.coroutines.awaitStringResponseResult
 import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.result.Result
 import com.google.gson.Gson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 
 
 class MainActivity : AppCompatActivity() {
     private val REQUEST_ENABLEBLUETOOTH: Int = 1
+    // TODO: 本番環境のURLに変える
+    private val SIGN_IN_URL: String = "http://202.13.162.197:3000/auth/sign_in"
+    private val SIGN_UP_URL: String = "http://202.13.162.197:3000/auth"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,13 +45,26 @@ class MainActivity : AppCompatActivity() {
 
         var DB = DatabaseHelper(this)
         var db: SQLiteDatabase? = DB.writableDatabase
+        lateinit var token: String
 
+        DB.onUpgrade(db, 1, 1)
         if (db == null) {
             DB.onCreate(db)
         }
 
-        if (DB.findUser()) {
-            setContentView(R.layout.activity_main2)
+        if (DB.existUser()) {
+            val (DBEmail, DBPassword) = DB.getUser()
+            val (request, response, result) = CommunicateServer(SIGN_IN_URL,
+                "{\"session\": {\"email\":\"$DBEmail\", \"password\":\"$DBPassword\"}}"
+            )
+            when(result){
+                is Result.Success -> {
+                    token = response["access-token"].toString()
+                    setContentView(R.layout.activity_main2)
+                }
+                is Result.Failure -> {
+                }
+            }
         } else {
             val manager: BluetoothManager =
                 getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -60,7 +77,7 @@ class MainActivity : AppCompatActivity() {
             val PBar: ProgressBar = findViewById<ProgressBar>(R.id.progressBar)
 
             val BLEAddress: String = adapter!!.address.toString()
-            var percent = 0
+            var percent = 20
 
             SignUpbtn.setOnClickListener {
                 val CurrentUser = UserModel(
@@ -70,32 +87,17 @@ class MainActivity : AppCompatActivity() {
                     BLEAddress
                 )
 
-                val header: HashMap<String, String> =
-                    hashMapOf("Content-Type" to "application/json")
                 val body = Gson().toJson(CurrentUser)
                 var flag = false
 
-                // TODO: Coroutine勉強してリファクタリングする
-                GlobalScope.launch(Dispatchers.Main) {
-                    async(Dispatchers.Default) {
-                        "http://202.13.162.197:3000/auth".httpPost().header(header).body(body)
-                            .response()
-                    }.await().let {
-                        when (it.third) {
-                            is Result.Success -> {
-                                percent = 100
-                                flag = true
-                                DB.saveUser(CurrentUser)
-                            }
-                            is Result.Failure -> {
-                                percent = 20
-                                flag = false
-                            }
-                        }
-                        ProgressChanged(PBar, percent)
-                        if (flag) {
-                            setContentView(R.layout.activity_main2)
-                        }
+                val (request, response, result) = CommunicateServer(SIGN_UP_URL, "{\"registration\":" + body + "}")
+                when(result){
+                    is Result.Success -> {
+                        token = response["access-token"].toString()
+                        DB.saveUser(CurrentUser)
+                        setContentView(R.layout.activity_main2)
+                    }
+                    is Result.Failure -> {
                     }
                 }
             }
@@ -117,66 +119,83 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+}
 
+class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+    companion object {
+        private val DB_VERSION = 1
+        private val DB_NAME = "cafe_dev.db"
 
-    class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
-        companion object {
-            private val DB_VERSION = 1
-            private val DB_NAME = "cafe_dev.db"
+        private val TABLE_NAME         = "cafeUser"
+        private val COLUMN_ID          = "id"
+        private val COLUMN_NAME        = "name"
+        private val COLUMN_EMAIL       = "email"
+        private val COLUMN_PASSWORD    = "password"
+        private val COLUMN_BLE_ADDRESS = "ble_address"
 
-            private val TABLE_NAME         = "cafeUser"
-            private val COLUMN_ID          = "id"
-            private val COLUMN_NAME        = "name"
-            private val COLUMN_EMAIL       = "email"
-            private val COLUMN_PASSWORD    = "password"
-            private val COLUMN_BLE_ADDRESS = "ble_address"
+        private val SQL_CREATE_TABLE = String.format(
+            "CREATE TABLE %s (%s INTEGER PRIMARY KEY AUTOINCREMENT,%s TEXT NOT NULL,%s TEXT NOT NULL, %s TEXT NOT NULL, %s TEXT NOT NULL);",
+            TABLE_NAME,
+            COLUMN_ID,
+            COLUMN_NAME,
+            COLUMN_EMAIL,
+            COLUMN_PASSWORD,
+            COLUMN_BLE_ADDRESS
+        )
 
-            private val SQL_CREATE_TABLE = String.format(
-                "CREATE TABLE %s (%s INTEGER PRIMARY KEY AUTOINCREMENT,%s TEXT NOT NULL,%s TEXT NOT NULL, %s TEXT NOT NULL, %s TEXT NOT NULL);",
-                TABLE_NAME,
-                COLUMN_ID,
-                COLUMN_NAME,
-                COLUMN_EMAIL,
-                COLUMN_PASSWORD,
-                COLUMN_BLE_ADDRESS
-            )
+        private val SQL_DROP_TABLE = String.format("DROP TABLE IF EXISTS %s;", TABLE_NAME)
+    }
+    override fun onCreate(db: SQLiteDatabase?) {
+        db?.execSQL(SQL_CREATE_TABLE)
+    }
 
-            private val SQL_DROP_TABLE = String.format("DROP TABLE IF EXISTS %s;", TABLE_NAME)
-        }
-        override fun onCreate(db: SQLiteDatabase?) {
-            db?.execSQL(SQL_CREATE_TABLE)
-        }
+    override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
+        db?.execSQL(SQL_DROP_TABLE)
+        onCreate(db)
+    }
 
-        override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
-            db?.execSQL(SQL_DROP_TABLE)
-            onCreate(db)
-        }
+    fun saveUser(user: UserModel) {
+        val db = this.writableDatabase
+        val values = ContentValues()
+        values.put(COLUMN_EMAIL, user.email)
+        values.put(COLUMN_NAME, user.name)
+        values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化
+        values.put(COLUMN_BLE_ADDRESS, user.ble_address)
+        db.insert(TABLE_NAME, null, values)
+        db.close()
+    }
 
-        fun saveUser(user: UserModel) {
-            val db = this.writableDatabase
-            val values = ContentValues()
-            values.put(COLUMN_EMAIL, user.email)
-            values.put(COLUMN_NAME, user.name)
-            values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化
-            values.put(COLUMN_BLE_ADDRESS, user.ble_address)
-            db.insert(TABLE_NAME, null, values)
-            db.close()
-        }
+    fun existUser(): Boolean {
+        val db = this.writableDatabase
+        val userSQL = "SELECT count(*) as cnt from $TABLE_NAME;"
+        val cursor: Cursor = db.rawQuery(userSQL, null)
+        cursor.moveToFirst()
+        val count: Int = cursor.getInt(cursor.getColumnIndex("cnt"))
+        cursor.close()
+        return (count > 0)
+    }
 
-        fun findUser(): Boolean {
-            val db = this.writableDatabase
-            val userSQL = "SELECT count(*) as cnt from $TABLE_NAME;"
-
-            val cursor: Cursor = db.rawQuery(userSQL, null)
-            cursor.moveToFirst()
-            val count: Int = cursor.getInt(cursor.getColumnIndex("cnt"))
-            val flg: Boolean = (count > 0)
+    fun getUser(): Pair<String, String> {
+        val db = this.writableDatabase
+        val userSQL = "SELECT * from $TABLE_NAME WHERE ID = (SELECT MAX(ID)  FROM $TABLE_NAME);"
+        val cursor: Cursor = db.rawQuery(userSQL, null)
+        var email: String = ""
+        var password: String = ""
+        try{
+            if(cursor.moveToNext()){
+                email = cursor.getString(cursor.getColumnIndex("email"))
+                password = cursor.getString(cursor.getColumnIndex("password"))
+            }
+        } finally {
             cursor.close()
-            return flg
         }
+        return (email to password)
     }
 }
 
+/**
+ * ユーザが入力したデータをJsonに変換するためのクラス
+ */
 class UserModel(email: String, password: String, name: String, ble_address: String){
     val email = email
     val password = password
@@ -184,6 +203,9 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
     val ble_address = ble_address
 }
 
+/**
+ * ProgressBarを変える関数(必要性皆無)
+ */
 private fun ProgressChanged(PBar: ProgressBar, percentage: Int) {
     val animation = ObjectAnimator.ofInt(PBar, "progress", percentage)
     animation.duration = 1000
@@ -191,3 +213,10 @@ private fun ProgressChanged(PBar: ProgressBar, percentage: Int) {
     animation.start()
 }
 
+/**
+ * 非同期でサーバーと通信する関数
+ */
+private fun CommunicateServer(URL: String, body: String): Triple<Request, Response, Result<String, FuelError>> {
+    val header: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")
+    return runBlocking { URL.httpPost().header(header).body(body).awaitStringResponseResult() }
+}
