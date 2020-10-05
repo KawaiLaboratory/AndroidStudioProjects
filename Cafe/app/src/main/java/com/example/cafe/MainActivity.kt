@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
         var db: SQLiteDatabase? = DB.writableDatabase
         lateinit var token: String
 
-        DB.onUpgrade(db, 1, 1)
+        // DB.onUpgrade(db, 1, 1)
         if (db == null) {
             DB.onCreate(db)
         }
@@ -63,6 +63,7 @@ class MainActivity : AppCompatActivity() {
                     setContentView(R.layout.activity_main2)
                 }
                 is Result.Failure -> {
+                    // TODO: エラーをなんか考えとく
                 }
             }
         } else {
@@ -96,8 +97,11 @@ class MainActivity : AppCompatActivity() {
                         token = response["access-token"].toString()
                         DB.saveUser(CurrentUser)
                         setContentView(R.layout.activity_main2)
+                        ProgressChanged(PBar, 100)
                     }
                     is Result.Failure -> {
+                        ProgressChanged(PBar, 50)
+                        // TODO: already existsの場合はsign_inに飛ばすとかする
                     }
                 }
             }
@@ -159,7 +163,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         val values = ContentValues()
         values.put(COLUMN_EMAIL, user.email)
         values.put(COLUMN_NAME, user.name)
-        values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化
+        values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化する？
         values.put(COLUMN_BLE_ADDRESS, user.ble_address)
         db.insert(TABLE_NAME, null, values)
         db.close()
@@ -208,7 +212,7 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
  */
 private fun ProgressChanged(PBar: ProgressBar, percentage: Int) {
     val animation = ObjectAnimator.ofInt(PBar, "progress", percentage)
-    animation.duration = 1000
+    animation.duration = 500
     animation.interpolator = DecelerateInterpolator()
     animation.start()
 }
