@@ -12,10 +12,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.os.Bundle
 import android.util.Log
 import android.view.animation.DecelerateInterpolator
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ProgressBar
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.github.kittinunf.fuel.core.FuelError
 import com.github.kittinunf.fuel.core.Request
@@ -25,6 +22,7 @@ import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.result.Result
 import com.google.gson.Gson
 import kotlinx.coroutines.*
+import org.w3c.dom.Text
 
 
 class MainActivity : AppCompatActivity() {
@@ -53,14 +51,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (DB.existUser()) {
-            val (DBEmail, DBPassword) = DB.getUser()
+            val user: UserModel = DB.getUser()
             val (request, response, result) = CommunicateServer(SIGN_IN_URL,
-                "{\"session\": {\"email\":\"$DBEmail\", \"password\":\"$DBPassword\"}}"
+                "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
             )
             when(result){
                 is Result.Success -> {
                     token = response["access-token"].toString()
                     setContentView(R.layout.activity_main2)
+                    val NameCol: TextView = findViewById<TextView>(R.id.UserName)
+                    val BLECol: TextView = findViewById<TextView>(R.id.UserBLE)
+                    NameCol.text = user.name
+                    BLECol.text = user.ble_address
                 }
                 is Result.Failure -> {
                     // TODO: エラーをなんか考えとく
@@ -78,7 +80,6 @@ class MainActivity : AppCompatActivity() {
             val PBar: ProgressBar = findViewById<ProgressBar>(R.id.progressBar)
 
             val BLEAddress: String = adapter!!.address.toString()
-            var percent = 20
 
             SignUpbtn.setOnClickListener {
                 val CurrentUser = UserModel(
@@ -97,11 +98,11 @@ class MainActivity : AppCompatActivity() {
                         token = response["access-token"].toString()
                         DB.saveUser(CurrentUser)
                         setContentView(R.layout.activity_main2)
-                        ProgressChanged(PBar, 100)
+                        PBar.setProgress(100, true)
                     }
                     is Result.Failure -> {
-                        ProgressChanged(PBar, 50)
                         // TODO: already existsの場合はsign_inに飛ばすとかする
+                        PBar.setProgress(50, true)
                     }
                 }
             }
@@ -179,21 +180,27 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         return (count > 0)
     }
 
-    fun getUser(): Pair<String, String> {
+    fun getUser(): UserModel {
         val db = this.writableDatabase
         val userSQL = "SELECT * from $TABLE_NAME WHERE ID = (SELECT MAX(ID)  FROM $TABLE_NAME);"
         val cursor: Cursor = db.rawQuery(userSQL, null)
         var email: String = ""
         var password: String = ""
+        var name: String = ""
+        var ble: String = ""
+        lateinit var user: UserModel
         try{
             if(cursor.moveToNext()){
-                email = cursor.getString(cursor.getColumnIndex("email"))
-                password = cursor.getString(cursor.getColumnIndex("password"))
+                email = cursor.getString(cursor.getColumnIndex(COLUMN_EMAIL))
+                name = cursor.getString(cursor.getColumnIndex(COLUMN_NAME))
+                password = cursor.getString(cursor.getColumnIndex(COLUMN_PASSWORD))
+                ble  = cursor.getString(cursor.getColumnIndex(COLUMN_BLE_ADDRESS))
             }
         } finally {
+            user = UserModel(email, password, name, ble)
             cursor.close()
         }
-        return (email to password)
+        return user
     }
 }
 
@@ -205,16 +212,6 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
     val password = password
     val name = name
     val ble_address = ble_address
-}
-
-/**
- * ProgressBarを変える関数(必要性皆無)
- */
-private fun ProgressChanged(PBar: ProgressBar, percentage: Int) {
-    val animation = ObjectAnimator.ofInt(PBar, "progress", percentage)
-    animation.duration = 500
-    animation.interpolator = DecelerateInterpolator()
-    animation.start()
 }
 
 /**
