@@ -1,8 +1,13 @@
 package com.example.cafe
 
-import android.animation.ObjectAnimator
+import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -10,8 +15,6 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.os.Bundle
-import android.util.Log
-import android.view.animation.DecelerateInterpolator
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.github.kittinunf.fuel.core.FuelError
@@ -22,14 +25,12 @@ import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.result.Result
 import com.google.gson.Gson
 import kotlinx.coroutines.*
-import org.w3c.dom.Text
 
 
 class MainActivity : AppCompatActivity() {
-    private val REQUEST_ENABLEBLUETOOTH: Int = 1
     // TODO: 本番環境のURLに変える
-    private val SIGN_IN_URL: String = "http://202.13.162.197:3000/auth/sign_in"
-    private val SIGN_UP_URL: String = "http://202.13.162.197:3000/auth"
+    private val SIGN_IN_URL: String = "auth/sign_in"
+    private val SIGN_UP_URL: String = "auth"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,30 +40,25 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        requestBluetoothFeature()
+        val DB = DatabaseHelper(this)
+        val db: SQLiteDatabase? = DB.writableDatabase
+        val RailsServer = Server(this)
+        val BLE = BleScanReceiver(this.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
+        var token: String = ""
 
-        var DB = DatabaseHelper(this)
-        var db: SQLiteDatabase? = DB.writableDatabase
-        lateinit var token: String
-
-        // DB.onUpgrade(db, 1, 1)
-        if (db == null) {
-            DB.onCreate(db)
-        }
+        BLE.request(this, ::startActivityForResult )
+        DB.existDB(db)
 
         if (DB.existUser()) {
             val user: UserModel = DB.getUser()
-            val (request, response, result) = CommunicateServer(SIGN_IN_URL,
+            val (request, response, result) = RailsServer.PostJSON(SIGN_IN_URL,
                 "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
             )
             when(result){
                 is Result.Success -> {
                     token = response["access-token"].toString()
-                    setContentView(R.layout.activity_main2)
-                    val NameCol: TextView = findViewById<TextView>(R.id.UserName)
-                    val BLECol: TextView = findViewById<TextView>(R.id.UserBLE)
-                    NameCol.text = user.name
-                    BLECol.text = user.ble_address
+                    ChangeUserActiviry(user)
+                    BLE.startBleScan(this)
                 }
                 is Result.Failure -> {
                     // TODO: エラーをなんか考えとく
@@ -92,13 +88,12 @@ class MainActivity : AppCompatActivity() {
                 val body = Gson().toJson(CurrentUser)
                 var flag = false
 
-                val (request, response, result) = CommunicateServer(SIGN_UP_URL, "{\"registration\":" + body + "}")
+                val (request, response, result) = RailsServer.PostJSON(SIGN_UP_URL, "{\"registration\":" + body + "}")
                 when(result){
                     is Result.Success -> {
                         token = response["access-token"].toString()
                         DB.saveUser(CurrentUser)
-                        setContentView(R.layout.activity_main2)
-                        PBar.setProgress(100, true)
+                        ChangeUserActiviry(CurrentUser)
                     }
                     is Result.Failure -> {
                         // TODO: already existsの場合はsign_inに飛ばすとかする
@@ -109,23 +104,87 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun requestBluetoothFeature() {
-        val manager: BluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter: BluetoothAdapter? = manager.adapter
+    fun ChangeUserActiviry(user: UserModel){
+        setContentView(R.layout.activity_main2)
 
+        val NameCol: TextView = findViewById<TextView>(R.id.UserName)
+        val BLECol: TextView = findViewById<TextView>(R.id.UserBLE)
+
+        NameCol.text = user.name
+        BLECol.text = user.ble_address
+    }
+}
+
+/**
+ * Bluetooth通信をまとめたクラス
+ * https://qiita.com/KentaHarada/items/4a9072379113c311d27d 参照
+ */
+class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
+    private val REQUEST_ENABLEBLUETOOTH: Int = 1
+    private val manager: BluetoothManager = Bmanager
+    private val adapter: BluetoothAdapter = manager.adapter
+
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val error = intent?.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
+        if (error != -1) {
+            return
+        }
+
+        val callbackType = intent?.getIntExtra(BluetoothLeScanner.EXTRA_CALLBACK_TYPE, -1)
+
+        val scanResults: ArrayList<ScanResult> = intent.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
+        for (scanResult in scanResults) {
+            scanResult.device.name?.let {
+                // TODO: サーバーに送る
+            }
+        }
+        // stopBleScan(context)
+    }
+
+    private fun createBleScanPendingIntent(context: Context): PendingIntent {
+        val requestCode = 222
+        val intent = Intent(context, BleScanReceiver::class.java)
+        return PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    fun startBleScan(context: Context) {
+        val scanSettings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .build()
+
+        val scanFilters = listOf(ScanFilter.Builder().build())
+        val pendingIntent = createBleScanPendingIntent(context)
+
+        // BLEスキャン開始
+        adapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, pendingIntent).let {
+            if(it != 0) {
+                // BLEスキャン失敗
+            }
+        }
+    }
+
+    private fun stopBleScan(context: Context?) {
+        val pendingIntent = context?.let { createBleScanPendingIntent(it) }
+        adapter?.bluetoothLeScanner?.stopScan(pendingIntent)
+    }
+
+    fun request(context: Context, func: (Intent, Int) -> Unit ) {
         if(adapter == null){
-            Toast.makeText(this, R.string.bluetooth_is_not_supported, Toast.LENGTH_LONG).show()
-            finish()
+            Toast.makeText(context, R.string.bluetooth_is_not_supported, Toast.LENGTH_LONG).show()
         } else {
             if (adapter.isEnabled()) {
             } else {
                 var enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                startActivityForResult(enableBtIntent, REQUEST_ENABLEBLUETOOTH)
+                func(enableBtIntent, REQUEST_ENABLEBLUETOOTH)
             }
         }
     }
 }
 
+/**
+ * データベースを操作するクラス
+ * http://www.gigas-jp.com/appnews/archives/7584 参照
+ */
 class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
     companion object {
         private val DB_VERSION = 1
@@ -202,10 +261,17 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         }
         return user
     }
+
+    fun existDB(db: SQLiteDatabase?){
+        // this.onUpgrade(db, 1, 1)
+        if (db == null) {
+            this.onCreate(db)
+        }
+    }
 }
 
 /**
- * ユーザが入力したデータをJsonに変換するためのクラス
+ * ユーザが入力したデータをJsonに変換するためのユーザークラス
  */
 class UserModel(email: String, password: String, name: String, ble_address: String){
     val email = email
@@ -215,9 +281,13 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
 }
 
 /**
- * 非同期でサーバーと通信する関数
+ * サーバーと通信するためのクラス
  */
-private fun CommunicateServer(URL: String, body: String): Triple<Request, Response, Result<String, FuelError>> {
-    val header: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")
-    return runBlocking { URL.httpPost().header(header).body(body).awaitStringResponseResult() }
+class Server(context: Context){
+    private val ROUTE_URL = "http://202.13.162.197:3000/"
+
+    fun PostJSON(URL: String, body: String): Triple<Request, Response, Result<String, FuelError>>{
+        val header: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")
+        return runBlocking(Dispatchers.Default) { (ROUTE_URL+URL).httpPost().header(header).body(body).awaitStringResponseResult() }
+    }
 }
