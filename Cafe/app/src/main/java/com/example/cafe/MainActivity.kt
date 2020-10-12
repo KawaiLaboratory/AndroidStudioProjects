@@ -1,5 +1,6 @@
 package com.example.cafe
 
+import android.app.Activity
 import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -15,22 +16,23 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.os.Bundle
-import android.widget.*
+import android.util.Log
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.github.kittinunf.fuel.core.FuelError
-import com.github.kittinunf.fuel.core.Request
 import com.github.kittinunf.fuel.core.Response
-import com.github.kittinunf.fuel.coroutines.awaitStringResponseResult
+import com.github.kittinunf.fuel.core.ResponseResultOf
 import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.result.Result
 import com.google.gson.Gson
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
 
 class MainActivity : AppCompatActivity() {
-    // TODO: 本番環境のURLに変える
-    private val SIGN_IN_URL: String = "auth/sign_in"
-    private val SIGN_UP_URL: String = "auth"
+    val REQUEST_ENABLEBLUETOOTH: Int = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,63 +43,66 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
 
         val DB = DatabaseHelper(this)
-        val db: SQLiteDatabase? = DB.writableDatabase
+
         val RailsServer = Server(this)
-        val BLE = BleScanReceiver(this.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
-        var token: String = ""
+        val BLE = BleScanReceiver(
+            this.getSystemService(Context.BLUETOOTH_SERVICE)
+                    as BluetoothManager
+        )
 
-        BLE.request(this, ::startActivityForResult )
-        DB.existDB(db)
-
-        if (DB.existUser()) {
-            val user: UserModel = DB.getUser()
-            val (request, response, result) = RailsServer.PostJSON(SIGN_IN_URL,
-                "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
-            )
-            when(result){
-                is Result.Success -> {
-                    token = response["access-token"].toString()
-                    ChangeUserActiviry(user)
-                    BLE.startBleScan(this)
-                }
-                is Result.Failure -> {
-                    // TODO: エラーをなんか考えとく
-                }
+        when (BLE.request(this)) {
+            BLE.BLE_NOT_SUPPORTED -> {
+                finish()
             }
-        } else {
-            val manager: BluetoothManager =
-                getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-            val adapter: BluetoothAdapter? = manager.adapter
+            BLE.BLE_NOT_WORKING -> {
+                var enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                startActivityForResult(enableBtIntent, REQUEST_ENABLEBLUETOOTH)
+            }
+            BLE.BLE_SUCCESS -> {
+                DB.existDB()
+                when (DB.existUser()) {
+                    true -> {
+                        val user: UserModel = DB.getUser()
+                        var (result, railsUser, header) = RailsServer.SignIn(user)
 
-            val EmailForm: EditText = findViewById<EditText>(R.id.EmailAddress)
-            val PasswordForm: EditText = findViewById<EditText>(R.id.Password)
-            val NameForm: EditText = findViewById<EditText>(R.id.Personname)
-            val SignUpbtn: Button = findViewById<Button>(R.id.SignUpBtn)
-            val PBar: ProgressBar = findViewById<ProgressBar>(R.id.progressBar)
-
-            val BLEAddress: String = adapter!!.address.toString()
-
-            SignUpbtn.setOnClickListener {
-                val CurrentUser = UserModel(
-                    EmailForm.text.toString(),
-                    PasswordForm.text.toString(),
-                    NameForm.text.toString(),
-                    BLEAddress
-                )
-
-                val body = Gson().toJson(CurrentUser)
-                var flag = false
-
-                val (request, response, result) = RailsServer.PostJSON(SIGN_UP_URL, "{\"registration\":" + body + "}")
-                when(result){
-                    is Result.Success -> {
-                        token = response["access-token"].toString()
-                        DB.saveUser(CurrentUser)
-                        ChangeUserActiviry(CurrentUser)
+                        when (result) {
+                            true -> {
+                                ChangeUserActiviry(railsUser)
+                                BLE.startBleScan(this)
+                            }
+                            false -> {
+                                Toast.makeText(this, "error!", Toast.LENGTH_LONG)
+                            }
+                        }
                     }
-                    is Result.Failure -> {
-                        // TODO: already existsの場合はsign_inに飛ばすとかする
-                        PBar.setProgress(50, true)
+                    false -> {
+                        val EmailForm: EditText = findViewById<EditText>(R.id.EmailAddress)
+                        val PasswordForm: EditText = findViewById<EditText>(R.id.Password)
+                        val NameForm: EditText = findViewById<EditText>(R.id.Personname)
+                        val SignUpbtn: Button = findViewById<Button>(R.id.SignUpBtn)
+
+                        val BLEAddress: String = BLE.getAddress()
+
+                        SignUpbtn.setOnClickListener {
+                            val user = UserModel(
+                                EmailForm.text.toString(),
+                                PasswordForm.text.toString(),
+                                NameForm.text.toString(),
+                                BLEAddress
+                            )
+
+                            var (result, railsUser, header) = RailsServer.SignUp(user, DB)
+
+                            when (result) {
+                                true -> {
+                                    ChangeUserActiviry(railsUser)
+                                    BLE.startBleScan(this)
+                                }
+                                false -> {
+                                    Toast.makeText(this, "error!", Toast.LENGTH_LONG)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -113,6 +118,24 @@ class MainActivity : AppCompatActivity() {
         NameCol.text = user.name
         BLECol.text = user.ble_address
     }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        when(requestCode){
+            REQUEST_ENABLEBLUETOOTH -> {
+                when(resultCode){
+                    Activity.RESULT_CANCELED -> {
+                        Toast.makeText(
+                            this,
+                            R.string.bluetooth_is_not_working,
+                            Toast.LENGTH_LONG
+                        ).show()
+                        finish()
+                    }
+                }
+            }
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
 }
 
 /**
@@ -120,9 +143,12 @@ class MainActivity : AppCompatActivity() {
  * https://qiita.com/KentaHarada/items/4a9072379113c311d27d 参照
  */
 class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
-    private val REQUEST_ENABLEBLUETOOTH: Int = 1
     private val manager: BluetoothManager = Bmanager
-    private val adapter: BluetoothAdapter = manager.adapter
+    private val adapter: BluetoothAdapter? = manager.adapter
+
+    val BLE_SUCCESS:       Int =  0
+    val BLE_NOT_SUPPORTED: Int = -1
+    val BLE_NOT_WORKING:   Int = -2
 
     override fun onReceive(context: Context?, intent: Intent?) {
         val error = intent?.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
@@ -132,7 +158,9 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
 
         val callbackType = intent?.getIntExtra(BluetoothLeScanner.EXTRA_CALLBACK_TYPE, -1)
 
-        val scanResults: ArrayList<ScanResult> = intent.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
+        val scanResults: ArrayList<ScanResult> = intent.getParcelableArrayListExtra(
+            BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT
+        )!!
         for (scanResult in scanResults) {
             scanResult.device.name?.let {
                 // TODO: サーバーに送る
@@ -142,9 +170,14 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
     }
 
     private fun createBleScanPendingIntent(context: Context): PendingIntent {
-        val requestCode = 222
+        val requestCode = 100
         val intent = Intent(context, BleScanReceiver::class.java)
-        return PendingIntent.getBroadcast(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     fun startBleScan(context: Context) {
@@ -158,7 +191,7 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
         // BLEスキャン開始
         adapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, pendingIntent).let {
             if(it != 0) {
-                // BLEスキャン失敗
+                Log.d("ble", "error")
             }
         }
     }
@@ -168,16 +201,28 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
         adapter?.bluetoothLeScanner?.stopScan(pendingIntent)
     }
 
-    fun request(context: Context, func: (Intent, Int) -> Unit ) {
-        if(adapter == null){
-            Toast.makeText(context, R.string.bluetooth_is_not_supported, Toast.LENGTH_LONG).show()
-        } else {
-            if (adapter.isEnabled()) {
-            } else {
-                var enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                func(enableBtIntent, REQUEST_ENABLEBLUETOOTH)
+    fun request(context: Context): Int {
+        when(adapter){
+            null -> {
+                Toast.makeText(context, R.string.bluetooth_is_not_supported, Toast.LENGTH_LONG)
+                    .show()
+                return BLE_NOT_SUPPORTED
+            }
+            else -> {
+                return when(adapter.isEnabled){
+                    true -> {
+                        BLE_SUCCESS
+                    }
+                    false -> {
+                        BLE_NOT_WORKING
+                    }
+                }
             }
         }
+    }
+
+    fun getAddress(): String {
+        return adapter!!.address.toString()
     }
 }
 
@@ -262,7 +307,9 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         return user
     }
 
-    fun existDB(db: SQLiteDatabase?){
+    fun existDB(){
+        val db: SQLiteDatabase? = this.writableDatabase
+
         // this.onUpgrade(db, 1, 1)
         if (db == null) {
             this.onCreate(db)
@@ -274,10 +321,19 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
  * ユーザが入力したデータをJsonに変換するためのユーザークラス
  */
 class UserModel(email: String, password: String, name: String, ble_address: String){
-    val email = email
-    val password = password
-    val name = name
-    val ble_address = ble_address
+    val email: String? = email
+    val password: String? = password
+    val name: String? = name
+    val ble_address: String? = ble_address
+}
+
+/**
+ * サーバーレスポンスを整形したものの格納クラス
+ */
+class HeaderData(response: Response){
+    var uid: String? = response["uid"].toString()
+    var token: String? = response["access-token"].toString()
+    var client: String? = response["client"].toString()
 }
 
 /**
@@ -285,9 +341,87 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
  */
 class Server(context: Context){
     private val ROUTE_URL = "http://202.13.162.197:3000/"
+    private val SIGN_IN_URL: String = "auth/sign_in"
+    private val SIGN_UP_URL: String = "auth"
+    private val HTTP_CONFRICT = 409
 
-    fun PostJSON(URL: String, body: String): Triple<Request, Response, Result<String, FuelError>>{
+    fun getUserResponse(user: UserModel, response: Response): Pair<UserModel, HeaderData>{
+        val resHeader = HeaderData(response)
+        val Data = Gson().fromJson(
+            response.data.toString(Charsets.UTF_8),
+            HashMap::class.java
+        )
+        val RailsData = Gson().fromJson(
+            Gson().toJson(Data["data"]),
+            HashMap::class.java
+        )
+
+        val user: UserModel = UserModel(
+            user.email!!,
+            user.password!!,
+            RailsData["name"].toString(),
+            RailsData["ble_address"].toString()
+        )
+        return Pair(user, resHeader)
+    }
+
+    fun SignIn(user: UserModel): Triple<Boolean, UserModel, HeaderData>{
+        val (request, response, result) = this.PostJSON(
+            SIGN_IN_URL,
+            "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
+        )
+        when(result){
+            is Result.Success -> {
+                val (RailsUser, resHeader) = this.getUserResponse(user, response)
+                return Triple(true, RailsUser, resHeader)
+            }
+            is Result.Failure -> {
+                val resHeader = HeaderData(response)
+                return Triple(false, user, resHeader)
+            }
+        }
+    }
+
+    fun SignUp(user: UserModel, DB: DatabaseHelper): Triple<Boolean, UserModel, HeaderData> {
+        val (request, response, result) = this.PostJSON(
+            SIGN_UP_URL,
+            "{\"registration\":" + Gson().toJson(user) + "}"
+        )
+        val resHeader = HeaderData(response)
+        when(result){
+            is Result.Success -> {
+                DB.saveUser(user)
+                return Triple(true, user, resHeader)
+            }
+            is Result.Failure -> {
+                when(response.statusCode){
+                    HTTP_CONFRICT -> {
+                        val (_result, _user, _header) = SignIn(user)
+                        return when(_result){
+                            true -> {
+                                DB.saveUser(_user)
+                                Triple(_result, _user, _header)
+                            }
+                            false -> {
+                                Triple(false, user, _header)
+                            }
+                        }
+                    }
+                    else -> {
+                        return Triple(false, user, resHeader)
+                    }
+                }
+            }
+        }
+    }
+
+    fun PostJSON(URL: String, body: String): ResponseResultOf<ByteArray> {
         val header: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")
-        return runBlocking(Dispatchers.Default) { (ROUTE_URL+URL).httpPost().header(header).body(body).awaitStringResponseResult() }
+        return runBlocking(Dispatchers.Default) {
+            (ROUTE_URL+URL).httpPost()
+                .header(header)
+                .body(body)
+                .response()
+        }
     }
 }
