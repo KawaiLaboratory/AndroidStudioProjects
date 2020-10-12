@@ -24,8 +24,8 @@
             android:id="@+id/textView2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/sign_up"
-            android:textSize="36sp" />
+            android:text="@string/sign_in"
+            android:textSize="30sp" />
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -80,7 +80,7 @@
             android:id="@+id/SignUpBtn"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/sign_up_btn" />
+            android:text="@string/sign_in" />
 
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

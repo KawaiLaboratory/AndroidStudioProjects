@@ -43,7 +43,6 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
 
         val DB = DatabaseHelper(this)
-
         val RailsServer = Server(this)
         val BLE = BleScanReceiver(
             this.getSystemService(Context.BLUETOOTH_SERVICE)
@@ -152,25 +151,27 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
 
     override fun onReceive(context: Context?, intent: Intent?) {
         val error = intent?.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
-        if (error != -1) {
-            return
-        }
+        when {
+            error != -1 -> {
+                return
+            }
+            else -> {
+                val callbackType = intent?.getIntExtra(BluetoothLeScanner.EXTRA_CALLBACK_TYPE, -1)
 
-        val callbackType = intent?.getIntExtra(BluetoothLeScanner.EXTRA_CALLBACK_TYPE, -1)
-
-        val scanResults: ArrayList<ScanResult> = intent.getParcelableArrayListExtra(
-            BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT
-        )!!
-        for (scanResult in scanResults) {
-            scanResult.device.name?.let {
-                // TODO: サーバーに送る
+                val scanResults: ArrayList<ScanResult> = intent.getParcelableArrayListExtra(
+                    BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT
+                )!!
+                for (scanResult in scanResults) {
+                    scanResult.device.name?.let {
+                        // TODO: サーバーに送る
+                    }
+                }
             }
         }
-        // stopBleScan(context)
     }
 
     private fun createBleScanPendingIntent(context: Context): PendingIntent {
-        val requestCode = 100
+        val requestCode = 241
         val intent = Intent(context, BleScanReceiver::class.java)
         return PendingIntent.getBroadcast(
             context,
@@ -190,8 +191,13 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
 
         // BLEスキャン開始
         adapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, pendingIntent).let {
-            if(it != 0) {
-                Log.d("ble", "error")
+            when (it){
+                0 -> {
+                    Log.d("ble", "started")
+                }
+                else -> {
+                    Log.d("ble", "error")
+                }
             }
         }
     }
@@ -294,11 +300,13 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         var ble: String = ""
         lateinit var user: UserModel
         try{
-            if(cursor.moveToNext()){
-                email = cursor.getString(cursor.getColumnIndex(COLUMN_EMAIL))
-                name = cursor.getString(cursor.getColumnIndex(COLUMN_NAME))
-                password = cursor.getString(cursor.getColumnIndex(COLUMN_PASSWORD))
-                ble  = cursor.getString(cursor.getColumnIndex(COLUMN_BLE_ADDRESS))
+            when {
+                cursor.moveToNext() -> {
+                    email = cursor.getString(cursor.getColumnIndex(COLUMN_EMAIL))
+                    name = cursor.getString(cursor.getColumnIndex(COLUMN_NAME))
+                    password = cursor.getString(cursor.getColumnIndex(COLUMN_PASSWORD))
+                    ble  = cursor.getString(cursor.getColumnIndex(COLUMN_BLE_ADDRESS))
+                }
             }
         } finally {
             user = UserModel(email, password, name, ble)
@@ -311,8 +319,10 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         val db: SQLiteDatabase? = this.writableDatabase
 
         // this.onUpgrade(db, 1, 1)
-        if (db == null) {
-            this.onCreate(db)
+        when (db) {
+            null -> {
+                this.onCreate(db)
+            }
         }
     }
 }
@@ -370,14 +380,14 @@ class Server(context: Context){
             SIGN_IN_URL,
             "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
         )
-        when(result){
+        return when(result){
             is Result.Success -> {
                 val (RailsUser, resHeader) = this.getUserResponse(user, response)
-                return Triple(true, RailsUser, resHeader)
+                Triple(true, RailsUser, resHeader)
             }
             is Result.Failure -> {
                 val resHeader = HeaderData(response)
-                return Triple(false, user, resHeader)
+                Triple(false, user, resHeader)
             }
         }
     }
