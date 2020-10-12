@@ -29,6 +29,7 @@ import com.github.kittinunf.result.Result
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import java.nio.charset.Charset
 
 
 class MainActivity : AppCompatActivity() {
@@ -54,7 +55,7 @@ class MainActivity : AppCompatActivity() {
                 finish()
             }
             BLE.BLE_NOT_WORKING -> {
-                var enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                val enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                 startActivityForResult(enableBtIntent, REQUEST_ENABLEBLUETOOTH)
             }
             BLE.BLE_SUCCESS -> {
@@ -68,9 +69,10 @@ class MainActivity : AppCompatActivity() {
                             true -> {
                                 ChangeUserActiviry(railsUser)
                                 BLE.startBleScan(this)
+                                header = RailsServer.CreateLog(header)
                             }
                             false -> {
-                                Toast.makeText(this, "error!", Toast.LENGTH_LONG)
+                                Toast.makeText(this, "error!", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
@@ -98,7 +100,7 @@ class MainActivity : AppCompatActivity() {
                                     BLE.startBleScan(this)
                                 }
                                 false -> {
-                                    Toast.makeText(this, "error!", Toast.LENGTH_LONG)
+                                    Toast.makeText(this, "error!", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
@@ -341,9 +343,9 @@ class UserModel(email: String, password: String, name: String, ble_address: Stri
  * サーバーレスポンスを整形したものの格納クラス
  */
 class HeaderData(response: Response){
-    var uid: String? = response["uid"].toString()
-    var token: String? = response["access-token"].toString()
-    var client: String? = response["client"].toString()
+    var uid: String? = response["uid"].toString().removePrefix("[").removeSuffix("]")
+    var token: String? = response["access-token"].toString().removePrefix("[").removeSuffix("]")
+    var client: String? = response["client"].toString().removePrefix("[").removeSuffix("]")
 }
 
 /**
@@ -353,6 +355,7 @@ class Server(context: Context){
     private val ROUTE_URL = "http://202.13.162.197:3000/"
     private val SIGN_IN_URL: String = "auth/sign_in"
     private val SIGN_UP_URL: String = "auth"
+    private val LOG_CREATE_URL: String = "log"
     private val HTTP_CONFRICT = 409
 
     fun getUserResponse(user: UserModel, response: Response): Pair<UserModel, HeaderData>{
@@ -425,11 +428,25 @@ class Server(context: Context){
         }
     }
 
-    fun PostJSON(URL: String, body: String): ResponseResultOf<ByteArray> {
-        val header: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")
+    fun CreateLog(header: HeaderData): HeaderData{
+        val head: HashMap<String, String> = hashMapOf(
+            "Content-Type" to "application/json",
+            "uid" to header.uid!!,
+            "access-token" to header.token!!,
+            "client" to header.client!!
+        )
+        val (request, response, result) = this.PostJSON(
+            LOG_CREATE_URL,
+            "{\"log\": {\"detected_ble_address\": \"AA:AA:AA:AA:AA:AA\", \"rssi\": -40}}",
+            head
+        )
+        return HeaderData(response)
+    }
+
+    fun PostJSON(URL: String, body: String, head: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")): ResponseResultOf<ByteArray> {
         return runBlocking(Dispatchers.Default) {
             (ROUTE_URL+URL).httpPost()
-                .header(header)
+                .header(head)
                 .body(body)
                 .response()
         }

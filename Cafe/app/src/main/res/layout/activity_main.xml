@@ -33,9 +33,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
 
-        <Space
+        <TextView
+            android:id="@+id/textView3"
             android:layout_width="match_parent"
-            android:layout_height="20dp" />
+            android:layout_height="20dp"
+            android:text="@string/email_label" />
 
         <EditText
             android:id="@+id/EmailAddress"
@@ -50,6 +52,12 @@
             android:layout_width="match_parent"
             android:layout_height="20dp" />
 
+        <TextView
+            android:id="@+id/textView4"
+            android:layout_width="match_parent"
+            android:layout_height="20dp"
+            android:text="@string/password_label" />
+
         <EditText
             android:id="@+id/Password"
             android:layout_width="match_parent"
@@ -62,6 +70,12 @@
         <Space
             android:layout_width="match_parent"
             android:layout_height="20dp" />
+
+        <TextView
+            android:id="@+id/textView5"
+            android:layout_width="match_parent"
+            android:layout_height="20dp"
+            android:text="@string/name_label" />
 
         <EditText
             android:id="@+id/Personname"

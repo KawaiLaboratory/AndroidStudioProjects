@@ -16,10 +16,22 @@
         app:layout_constraintTop_toTopOf="parent">
 
         <TextView
+            android:id="@+id/textView8"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/name" />
+
+        <TextView
             android:id="@+id/UserName"
             android:layout_width="match_parent"
             android:layout_height="50dp"
             android:textSize="30sp" />
+
+        <TextView
+            android:id="@+id/textView9"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ble" />
 
         <TextView
             android:id="@+id/UserBLE"
