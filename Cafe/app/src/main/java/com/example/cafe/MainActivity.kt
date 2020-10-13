@@ -28,8 +28,8 @@ import com.github.kittinunf.fuel.httpPost
 import com.github.kittinunf.result.Result
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import java.nio.charset.Charset
 
 
 class MainActivity : AppCompatActivity() {
@@ -44,10 +44,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
 
         val DB = DatabaseHelper(this)
-        val RailsServer = Server(this)
+        val server = Server(this)
         val BLE = BleScanReceiver(
             this.getSystemService(Context.BLUETOOTH_SERVICE)
-                    as BluetoothManager
+                    as BluetoothManager,
+            server
         )
 
         when (BLE.request(this)) {
@@ -63,13 +64,19 @@ class MainActivity : AppCompatActivity() {
                 when (DB.existUser()) {
                     true -> {
                         val user: UserModel = DB.getUser()
-                        var (result, railsUser, header) = RailsServer.SignIn(user)
+                        var (result, railsUser) = server.SignIn(user)
 
                         when (result) {
                             true -> {
                                 ChangeUserActiviry(railsUser)
                                 BLE.startBleScan(this)
-                                header = RailsServer.CreateLog(header)
+                                // TODO: デバッグ終わったら消す
+                                repeat(10){
+                                    runBlocking {
+                                        server.CreateLog()
+                                        delay(1000)
+                                    }
+                                }
                             }
                             false -> {
                                 Toast.makeText(this, "error!", Toast.LENGTH_LONG).show()
@@ -92,7 +99,7 @@ class MainActivity : AppCompatActivity() {
                                 BLEAddress
                             )
 
-                            var (result, railsUser, header) = RailsServer.SignUp(user, DB)
+                            var (result, railsUser) = server.SignUp(user, DB)
 
                             when (result) {
                                 true -> {
@@ -143,9 +150,10 @@ class MainActivity : AppCompatActivity() {
  * Bluetooth通信をまとめたクラス
  * https://qiita.com/KentaHarada/items/4a9072379113c311d27d 参照
  */
-class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
+class BleScanReceiver(Bmanager: BluetoothManager, server: Server) : BroadcastReceiver() {
     private val manager: BluetoothManager = Bmanager
     private val adapter: BluetoothAdapter? = manager.adapter
+    private val rails: Server = server
 
     val BLE_SUCCESS:       Int =  0
     val BLE_NOT_SUPPORTED: Int = -1
@@ -165,7 +173,7 @@ class BleScanReceiver(Bmanager: BluetoothManager) : BroadcastReceiver() {
                 )!!
                 for (scanResult in scanResults) {
                     scanResult.device.name?.let {
-                        // TODO: サーバーに送る
+                        rails.CreateLog()
                     }
                 }
             }
@@ -357,46 +365,43 @@ class Server(context: Context){
     private val SIGN_UP_URL: String = "auth"
     private val LOG_CREATE_URL: String = "log"
     private val HTTP_CONFRICT = 409
+    lateinit var headerData: HeaderData
 
-    fun getUserResponse(user: UserModel, response: Response): Pair<UserModel, HeaderData>{
-        val resHeader = HeaderData(response)
-        val Data = Gson().fromJson(
-            response.data.toString(Charsets.UTF_8),
-            HashMap::class.java
-        )
-        val RailsData = Gson().fromJson(
-            Gson().toJson(Data["data"]),
-            HashMap::class.java
-        )
-
-        val user: UserModel = UserModel(
-            user.email!!,
-            user.password!!,
-            RailsData["name"].toString(),
-            RailsData["ble_address"].toString()
-        )
-        return Pair(user, resHeader)
-    }
-
-    fun SignIn(user: UserModel): Triple<Boolean, UserModel, HeaderData>{
-        val (request, response, result) = this.PostJSON(
+    fun SignIn(user: UserModel): Pair<Boolean, UserModel>{
+        val (_, response, result) = this.PostJSON(
             SIGN_IN_URL,
             "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
         )
         return when(result){
             is Result.Success -> {
-                val (RailsUser, resHeader) = this.getUserResponse(user, response)
-                Triple(true, RailsUser, resHeader)
+                val resHeader = HeaderData(response)
+                val Data = Gson().fromJson(
+                    response.data.toString(Charsets.UTF_8),
+                    HashMap::class.java
+                )
+                val RailsData = Gson().fromJson(
+                    Gson().toJson(Data["data"]),
+                    HashMap::class.java
+                )
+
+                val userModel: UserModel = UserModel(
+                    user.email!!,
+                    user.password!!,
+                    RailsData["name"].toString(),
+                    RailsData["ble_address"].toString()
+                )
+                this.headerData = resHeader
+                Pair(true, userModel)
             }
             is Result.Failure -> {
                 val resHeader = HeaderData(response)
-                Triple(false, user, resHeader)
+                Pair(false, user)
             }
         }
     }
 
-    fun SignUp(user: UserModel, DB: DatabaseHelper): Triple<Boolean, UserModel, HeaderData> {
-        val (request, response, result) = this.PostJSON(
+    fun SignUp(user: UserModel, DB: DatabaseHelper): Pair<Boolean, UserModel> {
+        val (_, response, result) = this.PostJSON(
             SIGN_UP_URL,
             "{\"registration\":" + Gson().toJson(user) + "}"
         )
@@ -404,43 +409,47 @@ class Server(context: Context){
         when(result){
             is Result.Success -> {
                 DB.saveUser(user)
-                return Triple(true, user, resHeader)
+                this.headerData = resHeader
+                return Pair(true, user)
             }
             is Result.Failure -> {
                 when(response.statusCode){
                     HTTP_CONFRICT -> {
-                        val (_result, _user, _header) = SignIn(user)
+                        val (_result, _user) = SignIn(user)
                         return when(_result){
                             true -> {
                                 DB.saveUser(_user)
-                                Triple(_result, _user, _header)
+                                Pair(_result, _user)
                             }
                             false -> {
-                                Triple(false, user, _header)
+                                Pair(false, user)
+                            }
+                            else -> {
+                                Pair(false, user)
                             }
                         }
                     }
                     else -> {
-                        return Triple(false, user, resHeader)
+                        return Pair(false, user)
                     }
                 }
             }
         }
     }
 
-    fun CreateLog(header: HeaderData): HeaderData{
+    fun CreateLog() {
         val head: HashMap<String, String> = hashMapOf(
             "Content-Type" to "application/json",
-            "uid" to header.uid!!,
-            "access-token" to header.token!!,
-            "client" to header.client!!
+            "uid" to this.headerData.uid!!,
+            "access-token" to this.headerData.token!!,
+            "client" to this.headerData.client!!
         )
-        val (request, response, result) = this.PostJSON(
+        val (_, response, result) = this.PostJSON(
             LOG_CREATE_URL,
             "{\"log\": {\"detected_ble_address\": \"AA:AA:AA:AA:AA:AA\", \"rssi\": -40}}",
             head
         )
-        return HeaderData(response)
+        this.headerData = HeaderData(response)
     }
 
     fun PostJSON(URL: String, body: String, head: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")): ResponseResultOf<ByteArray> {
