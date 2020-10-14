@@ -30,6 +30,11 @@ class MainActivity : AppCompatActivity() {
         val REQUEST_ENABLE_BT: Int = 1
         val REQUEST_CODE = 150
         val SERVICE_UUID = ParcelUuid(UUID.fromString("895D1816-CC8A-40E3-B5FC-42D8ED441E50"))
+        /**
+         * https://stackoverflow.com/questions/50527426/ble-how-to-set-uuid-to-16bit
+         */
+        val DATA_UUID = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
+        val USER_UUID =  UUID.randomUUID().toString().toByteArray()
         val permissions = arrayOf(
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
@@ -56,6 +61,7 @@ class MainActivity : AppCompatActivity() {
                     .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH).build()
                 val data: AdvertiseData = AdvertiseData.Builder()
                     .addServiceUuid(SERVICE_UUID)
+                    .addServiceData(DATA_UUID, "D".toByteArray(Charsets.UTF_8))
                     .build()
                 val callback: AdvertiseCallback =  object : AdvertiseCallback() {
                     override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
@@ -64,7 +70,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     override fun onStartFailure(errorCode: Int) {
-                        Log.d("adv", "failed")
+                        Log.d("adv", errorCode.toString())
                         super.onStartFailure(errorCode)
                     }
                 }

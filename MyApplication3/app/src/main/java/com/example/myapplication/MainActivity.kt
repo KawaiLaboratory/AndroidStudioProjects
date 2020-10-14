@@ -60,11 +60,13 @@ class MainActivity : AppCompatActivity() {
                 val callback = object : ScanCallback() {
                     override fun onScanResult(callbackType: Int, result: ScanResult?) {
                         super.onScanResult(callbackType, result)
-                        Log.d("scanResult", result!!.device.address)
+                        var data = result!!.scanRecord!!.serviceData
+                        Log.d("datas",
+                            data[ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))]!!.toString(Charsets.UTF_8))
                     }
                     override fun onScanFailed(errorCode: Int) {
                         super.onScanFailed(errorCode)
-                        Log.d("scanResult", errorCode.toString())
+                        Log.d("scanResult", "failed")
                     }
                 }
                 scanner.startScan(scanFilterList, scanSettings, callback)
