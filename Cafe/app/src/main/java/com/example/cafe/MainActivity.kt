@@ -30,6 +30,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.nio.charset.Charset
 
 
 class MainActivity : AppCompatActivity() {
@@ -62,27 +63,34 @@ class MainActivity : AppCompatActivity() {
             BLE.BLE_SUCCESS -> {
                 DB.existDB()
                 when (DB.existUser()) {
+                    /**
+                     * SQLiteにユーザーデータが存在する
+                     * => 登録済みの場合の処理
+                     */
                     true -> {
                         val user: UserModel = DB.getUser()
-                        var (result, railsUser) = server.SignIn(user)
+                        var (result, railsUser, errorMsg) = server.SignIn(user)
 
                         when (result) {
+                            /**
+                             * SignIn成功時
+                             */
                             true -> {
                                 ChangeUserActiviry(railsUser)
                                 BLE.startBleScan(this)
-                                // TODO: デバッグ終わったら消す
-                                repeat(10){
-                                    runBlocking {
-                                        server.CreateLog()
-                                        delay(1000)
-                                    }
-                                }
                             }
+                            /**
+                             * SignIn失敗時
+                             */
                             false -> {
-                                Toast.makeText(this, "error!", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this, result.toString(), Toast.LENGTH_LONG).show()
                             }
                         }
                     }
+                    /**
+                     * ユーザーデータがない場合の処理
+                     * => 新規登録 or サーバー内登録ユーザーの検索
+                     */
                     false -> {
                         val EmailForm: EditText = findViewById<EditText>(R.id.EmailAddress)
                         val PasswordForm: EditText = findViewById<EditText>(R.id.Password)
@@ -99,7 +107,7 @@ class MainActivity : AppCompatActivity() {
                                 BLEAddress
                             )
 
-                            var (result, railsUser) = server.SignUp(user, DB)
+                            var (result, railsUser, errorMsg) = server.SignUp(user, DB)
 
                             when (result) {
                                 true -> {
@@ -172,8 +180,8 @@ class BleScanReceiver(Bmanager: BluetoothManager, server: Server) : BroadcastRec
                     BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT
                 )!!
                 for (scanResult in scanResults) {
-                    scanResult.device.name?.let {
-                        rails.CreateLog()
+                    scanResult.let {
+                        rails.CreateLog(it.device.address, it.rssi)
                     }
                 }
             }
@@ -284,7 +292,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
         val values = ContentValues()
         values.put(COLUMN_EMAIL, user.email)
         values.put(COLUMN_NAME, user.name)
-        values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化する？
+        values.put(COLUMN_PASSWORD, user.password) //TODO: 暗号化する
         values.put(COLUMN_BLE_ADDRESS, user.ble_address)
         db.insert(TABLE_NAME, null, values)
         db.close()
@@ -360,17 +368,27 @@ class HeaderData(response: Response){
  * サーバーと通信するためのクラス
  */
 class Server(context: Context){
-    private val ROUTE_URL = "http://202.13.162.197:3000/"
+    // private val ROUTE_URL = "http://202.13.162.197:3000/"
+    private val ROUTE_URL = "https://klab-api-server.herokuapp.com/"
     private val SIGN_IN_URL: String = "auth/sign_in"
     private val SIGN_UP_URL: String = "auth"
     private val LOG_CREATE_URL: String = "log"
     private val HTTP_CONFRICT = 409
     lateinit var headerData: HeaderData
 
-    fun SignIn(user: UserModel): Pair<Boolean, UserModel>{
+    fun SignIn(user: UserModel): Triple<Boolean, UserModel, HashMap<String?, String?>>{
+        val body = Gson().toJson(
+            hashMapOf(
+                "session" to
+                hashMapOf(
+                    "email" to user.email,
+                    "password" to user.password
+                )
+            )
+        )
         val (_, response, result) = this.PostJSON(
             SIGN_IN_URL,
-            "{\"session\": {\"email\":\"${user.email}\", \"password\":\"${user.password}\"}}"
+            body
         )
         return when(result){
             is Result.Success -> {
@@ -391,26 +409,33 @@ class Server(context: Context){
                     RailsData["ble_address"].toString()
                 )
                 this.headerData = resHeader
-                Pair(true, userModel)
+                Triple(true, userModel, hashMapOf("" to ""))
             }
             is Result.Failure -> {
                 val resHeader = HeaderData(response)
-                Pair(false, user)
+                // TODO: エラー文追加
+                Triple(false, user, hashMapOf("" to ""))
             }
         }
     }
 
-    fun SignUp(user: UserModel, DB: DatabaseHelper): Pair<Boolean, UserModel> {
+    fun SignUp(user: UserModel, DB: DatabaseHelper): Triple<Boolean, UserModel, HashMap<String?, String?>> {
+        val body = Gson().toJson(
+            hashMapOf(
+                "registration" to user
+            )
+        )
         val (_, response, result) = this.PostJSON(
             SIGN_UP_URL,
-            "{\"registration\":" + Gson().toJson(user) + "}"
+            body
         )
         val resHeader = HeaderData(response)
+
         when(result){
             is Result.Success -> {
                 DB.saveUser(user)
                 this.headerData = resHeader
-                return Pair(true, user)
+                return Triple(true, user, hashMapOf("" to ""))
             }
             is Result.Failure -> {
                 when(response.statusCode){
@@ -419,34 +444,42 @@ class Server(context: Context){
                         return when(_result){
                             true -> {
                                 DB.saveUser(_user)
-                                Pair(_result, _user)
+                                Triple(_result, _user, hashMapOf("" to ""))
                             }
                             false -> {
-                                Pair(false, user)
-                            }
-                            else -> {
-                                Pair(false, user)
+                                // TODO: エラー文追加
+                                Triple(false, user, hashMapOf("" to ""))
                             }
                         }
                     }
                     else -> {
-                        return Pair(false, user)
+                        // TODO: エラー文追加
+                        return Triple(false, user, hashMapOf("" to ""))
                     }
                 }
             }
         }
     }
 
-    fun CreateLog() {
+    fun CreateLog(address: String = "AA:AA:AA:AA:AA:AA", RSSI: Int = -50) {
         val head: HashMap<String, String> = hashMapOf(
             "Content-Type" to "application/json",
             "uid" to this.headerData.uid!!,
             "access-token" to this.headerData.token!!,
             "client" to this.headerData.client!!
         )
+        val body = Gson().toJson(
+            hashMapOf(
+                "log" to
+                hashMapOf(
+                    "detected_ble_address" to address,
+                    "rssi" to RSSI
+                )
+            )
+        )
         val (_, response, result) = this.PostJSON(
             LOG_CREATE_URL,
-            "{\"log\": {\"detected_ble_address\": \"AA:AA:AA:AA:AA:AA\", \"rssi\": -40}}",
+            body,
             head
         )
         this.headerData = HeaderData(response)
