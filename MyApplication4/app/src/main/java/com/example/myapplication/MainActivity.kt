@@ -34,7 +34,7 @@ class MainActivity : AppCompatActivity() {
          * https://stackoverflow.com/questions/50527426/ble-how-to-set-uuid-to-16bit
          */
         val DATA_UUID = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
-        val USER_UUID =  UUID.randomUUID().toString().toByteArray()
+        val USER_UUID =  UUID.randomUUID().toString().replace("-", "").toByteArray(Charsets.UTF_8)
         val permissions = arrayOf(
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
@@ -54,16 +54,16 @@ class MainActivity : AppCompatActivity() {
             }
             (packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) -> {
                 val advertiser: BluetoothLeAdvertiser = bluetoothAdapter.bluetoothLeAdvertiser
-                val settings = AdvertiseSettings.Builder()
+                val advertiseSettings = AdvertiseSettings.Builder()
                     .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                     .setConnectable(false)
                     .setTimeout(0)
-                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH).build()
-                val data: AdvertiseData = AdvertiseData.Builder()
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).build()
+                val advertiseData: AdvertiseData = AdvertiseData.Builder()
                     .addServiceUuid(SERVICE_UUID)
                     .addServiceData(DATA_UUID, "D".toByteArray(Charsets.UTF_8))
                     .build()
-                val callback: AdvertiseCallback =  object : AdvertiseCallback() {
+                val advertiseCallback: AdvertiseCallback =  object : AdvertiseCallback() {
                     override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                         Log.d("adv", "success")
                         super.onStartSuccess(settingsInEffect)
@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
                         super.onStartFailure(errorCode)
                     }
                 }
-                advertiser.startAdvertising(settings, data, callback)
+                advertiser.startAdvertising(advertiseSettings, advertiseData, advertiseCallback)
             }
             else -> {
                 finish()
