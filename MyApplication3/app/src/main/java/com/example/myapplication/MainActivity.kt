@@ -1,11 +1,14 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.*
 import android.companion.BluetoothLeDeviceFilter
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
@@ -50,6 +53,12 @@ class MainActivity : AppCompatActivity() {
             }
             (packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) -> {
                 /**
+                 * バックグラウンド処理用変数
+                 */
+                val requestCode = 240
+                val intent = Intent(this, BleScanReceiver::class.java)
+                val pendingIntent = PendingIntent.getBroadcast(this, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+                /**
                  * BLE受信用変数
                  */
                 val scanner= bluetoothAdapter.bluetoothLeScanner
@@ -58,19 +67,6 @@ class MainActivity : AppCompatActivity() {
                 val scanSettings: ScanSettings = ScanSettings.Builder().setScanMode(
                     ScanSettings.SCAN_MODE_BALANCED
                 ).build()
-                val scanCallback = object : ScanCallback() {
-                    override fun onScanResult(callbackType: Int, result: ScanResult?) {
-                        super.onScanResult(callbackType, result)
-                        var data = result!!.scanRecord!!
-                        Log.d("TxPower",
-                            result.txPower.toString())
-                        Log.d("RSSI", result.rssi.toString())
-                    }
-                    override fun onScanFailed(errorCode: Int) {
-                        super.onScanFailed(errorCode)
-                        Log.d("scanResult", "failed")
-                    }
-                }
 
                 /**
                  * BLE送信用変数
@@ -96,11 +92,32 @@ class MainActivity : AppCompatActivity() {
                         super.onStartFailure(errorCode)
                     }
                 }
-                scanner.startScan(scanFilterList, scanSettings, scanCallback)
+                /**
+                 * BLE送受信の開始
+                 */
+                scanner.startScan(scanFilterList, scanSettings, pendingIntent)
                 advertiser.startAdvertising(advertiseSettings, advertiseData, advertiseCallback)
             }
             else -> {
                 finish()
+            }
+        }
+    }
+}
+
+class BleScanReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val error = intent!!.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
+        if (error != -1) {
+            Log.d("error", "BLE Scan error : $error")
+            return
+        }
+        val scanResults: ArrayList<ScanResult> = intent!!.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
+        for (scanResult in scanResults) {
+            scanResult.let {
+                Log.d("TxPower",
+                    scanResult.txPower.toString())
+                Log.d("RSSI", scanResult.rssi.toString())
             }
         }
     }
