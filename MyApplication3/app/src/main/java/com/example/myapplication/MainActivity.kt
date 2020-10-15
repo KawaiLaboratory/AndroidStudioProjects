@@ -27,10 +27,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-    }
-
-    override fun onResume() {
-        super.onResume()
 
         val bluetoothManager: BluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -39,11 +35,11 @@ class MainActivity : AppCompatActivity() {
         val SERVICE_UUID = ParcelUuid(UUID.fromString("895D1816-CC8A-40E3-B5FC-42D8ED441E50"))
         val DATA_UUID = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
         val permissions = arrayOf(
-                Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.INTERNET
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_ADMIN,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.INTERNET
         )
 
         if(!EasyPermissions.hasPermissions(this, *permissions)){
@@ -56,6 +52,7 @@ class MainActivity : AppCompatActivity() {
                 finish()
             }
             (packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) -> {
+                val randomHex = (0..0xFFFFFFF).random().toString()
                 /**
                  * バックグラウンド処理用変数
                  */
@@ -79,13 +76,13 @@ class MainActivity : AppCompatActivity() {
                  */
                 val advertiser: BluetoothLeAdvertiser = bluetoothAdapter.bluetoothLeAdvertiser
                 val advertiseSettings = AdvertiseSettings.Builder()
-                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                    .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
                     .setConnectable(false)
                     .setTimeout(0)
                     .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).build()
                 val advertiseData: AdvertiseData = AdvertiseData.Builder()
                     .addServiceUuid(SERVICE_UUID)
-                    .addServiceData(DATA_UUID, "D".toByteArray(Charsets.UTF_8))
+                    .addServiceData(DATA_UUID, randomHex.toString().toByteArray(Charsets.UTF_8))
                     .build()
                 val advertiseCallback: AdvertiseCallback =  object : AdvertiseCallback() {
                     override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
@@ -121,9 +118,7 @@ class BleScanReceiver : BroadcastReceiver() {
         val scanResults: ArrayList<ScanResult> = intent!!.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
         for (scanResult in scanResults) {
             scanResult.let {
-                Log.d("TxPower",
-                    scanResult.txPower.toString())
-                Log.d("RSSI", scanResult.rssi.toString())
+                println(scanResult.scanRecord!!.serviceData[ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))]!!.toString(Charsets.UTF_8))
             }
         }
     }
