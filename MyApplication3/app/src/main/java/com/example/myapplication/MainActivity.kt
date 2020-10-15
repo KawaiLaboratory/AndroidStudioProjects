@@ -1,7 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
-import android.app.PendingIntent
+import android.app.*
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.*
@@ -10,11 +10,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.IBinder
 import android.os.ParcelUuid
 import android.util.Log
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationCompat.PRIORITY_MIN
 import pub.devrel.easypermissions.EasyPermissions
 import java.util.*
 import kotlin.collections.ArrayList
@@ -57,7 +61,9 @@ class MainActivity : AppCompatActivity() {
                  */
                 val requestCode = 240
                 val intent = Intent(this, BleScanReceiver::class.java)
+                val intent2 = Intent(this, BleScanService::class.java)
                 val pendingIntent = PendingIntent.getBroadcast(this, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT)
+                startForegroundService(intent2)
                 /**
                  * BLE受信用変数
                  */
@@ -120,5 +126,40 @@ class BleScanReceiver : BroadcastReceiver() {
                 Log.d("RSSI", scanResult.rssi.toString())
             }
         }
+    }
+}
+
+class BleScanService : Service(){
+    override fun onBind(intent: Intent?): IBinder? {
+        TODO("Not yet implemented")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val channelId = "my_service"
+        val channelName = "My Background Service"
+        val channel = NotificationChannel(
+            channelId,
+            channelName,
+            NotificationManager.IMPORTANCE_NONE
+        )
+        val service = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        channel.description = "Silent Notification"
+        channel.setSound(null,null)
+        channel.enableLights(false)
+        channel.lightColor = Color.BLUE
+        channel.enableVibration(false)
+        channel.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        service.createNotificationChannel(channel)
+
+        val notificationBuilder = NotificationCompat.Builder(this, channelId)
+        val notification = notificationBuilder.setOngoing(true)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setPriority(PRIORITY_MIN)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
+        startForeground(101, notification)
+
+        return START_NOT_STICKY
     }
 }
