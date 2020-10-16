@@ -21,6 +21,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import android.widget.Button
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.PRIORITY_MIN
@@ -57,8 +58,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val bluetooth = BluetoothClass(this)
         val DB = DatabaseHelper(this)
+        val bluetooth = BluetoothClass(this, DB)
         val server = RailsServer()
 
         DB.existDB()
@@ -73,8 +74,10 @@ class MainActivity : AppCompatActivity() {
                 finish()
             }
             bluetooth.BLE_NOT_RUNNNING -> {
-                val enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+//                val enableBtIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+//                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+                Toast.makeText(this, "BLE not Running", Toast.LENGTH_SHORT).show()
+                finish()
             }
             else ->{
                 val advertiseIntent = Intent(this, BleScanService::class.java)
@@ -85,6 +88,13 @@ class MainActivity : AppCompatActivity() {
                         when{
                             result -> {
                                 startForegroundService(advertiseIntent)
+                                setContentView(R.layout.activity_user)
+
+                                val userName = findViewById<TextView>(R.id.userName)
+                                val bleToken = findViewById<TextView>(R.id.bleToken)
+
+                                userName.text = railsUser.name
+                                bleToken.text = railsUser.ble_token
                             }
                             else -> { }
                         }
@@ -105,6 +115,13 @@ class MainActivity : AppCompatActivity() {
                             when{
                                 result -> {
                                     startForegroundService(advertiseIntent)
+                                    setContentView(R.layout.activity_user)
+
+                                    val userName = findViewById<TextView>(R.id.userName)
+                                    val bleToken = findViewById<TextView>(R.id.bleToken)
+
+                                    userName.text = railsUser.name
+                                    bleToken.text = railsUser.ble_token
                                 }
                                 else -> { }
                             }
@@ -114,25 +131,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        when(requestCode){
-            REQUEST_ENABLE_BT -> {
-                when(resultCode){
-                    Activity.RESULT_CANCELED -> {
-                        Toast.makeText(this,"BLE not running",Toast.LENGTH_LONG).show()
-                        finish()
-                    }
-                }
-            }
-        }
-        super.onActivityResult(requestCode, resultCode, data)
-    }
 }
 
 class RailsServer(){
-    private val ROUTE_URL = "http://202.13.162.197:3000/"
-    // private val ROUTE_URL = "https://klab-api-server.herokuapp.com/"
+    // private val ROUTE_URL = "http://202.13.162.197:3000/"
+    private val ROUTE_URL = "https://klab-api-server.herokuapp.com/"
     private val SIGN_IN_URL: String = "auth/sign_in"
     private val SIGN_UP_URL: String = "auth"
     private val LOG_CREATE_URL: String = "log"
@@ -231,7 +234,7 @@ class RailsServer(){
     }
 }
 
-class BluetoothClass(val context: Context){
+class BluetoothClass(val context: Context, val DB: DatabaseHelper){
     private val SERVICE_UUID = ParcelUuid(UUID.fromString("895D1816-CC8A-40E3-B5FC-42D8ED441E50"))
     private val DATA_UUID    = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
     val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -273,6 +276,7 @@ class BluetoothClass(val context: Context){
 
     private fun startBleAdvertise(){
         val advertiser: BluetoothLeAdvertiser = bluetoothAdapter!!.bluetoothLeAdvertiser
+        val user = DB.getUser()
         val advertiseSettings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
             .setConnectable(false)
@@ -280,7 +284,7 @@ class BluetoothClass(val context: Context){
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).build()
         val advertiseData: AdvertiseData = AdvertiseData.Builder()
             .addServiceUuid(SERVICE_UUID)
-            .addServiceData(DATA_UUID, "aaaa".toByteArray(Charsets.UTF_8))
+            .addServiceData(DATA_UUID, user.ble_token!!.toByteArray(Charsets.UTF_8))
             .build()
         val advertiseCallback: AdvertiseCallback =  object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
@@ -316,6 +320,7 @@ class HeaderClass(response: Response){
 }
 
 class BleScanReceiver : BroadcastReceiver() {
+    private val DATA_UUID = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
     override fun onReceive(context: Context?, intent: Intent?) {
         val error = intent!!.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
         if (error != -1) {
@@ -325,7 +330,8 @@ class BleScanReceiver : BroadcastReceiver() {
         val scanResults: ArrayList<ScanResult> = intent!!.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
         for (scanResult in scanResults) {
             scanResult.let {
-                println(scanResult.scanRecord!!.serviceData[ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))]!!.toString(Charsets.UTF_8))
+                val bleTokenData = scanResult.scanRecord!!.serviceData[DATA_UUID]!!.toString(Charsets.UTF_8)
+                Toast.makeText(context, "Detected : $bleTokenData", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -347,7 +353,8 @@ class BleScanService : Service(){
         )
         val service = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val context = applicationContext
-        val bluetooth = BluetoothClass(context)
+        val DB = DatabaseHelper(context)
+        val bluetooth = BluetoothClass(context, DB)
 
         channel.description = "Silent Notification"
         channel.setSound(null,null)
@@ -452,7 +459,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null
 
     fun existDB(){
         val db: SQLiteDatabase? = this.writableDatabase
-        this.onUpgrade(db, 1, 1)
+        // this.onUpgrade(db, 1, 1)
         when (db) {
             null -> {
                 this.onCreate(db)
