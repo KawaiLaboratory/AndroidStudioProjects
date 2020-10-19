@@ -49,14 +49,18 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.INTERNET,
             Manifest.permission.FOREGROUND_SERVICE
         )
 
-        if(!EasyPermissions.hasPermissions(this, *permissions)){
-            EasyPermissions.requestPermissions(this, "パーミッションに関する説明", REQUEST_CODE, *permissions)
-            return
+        runBlocking {
+            if (!EasyPermissions.hasPermissions(this@MainActivity, *permissions)) {
+                EasyPermissions.requestPermissions(this@MainActivity,
+                    "次の権限を許可してください",
+                    REQUEST_CODE,
+                    *permissions)
+            }
+            return@runBlocking
         }
 
         val DB = DatabaseHelper(this)
