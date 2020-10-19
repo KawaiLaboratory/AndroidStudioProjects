@@ -36,9 +36,9 @@ import pub.devrel.easypermissions.EasyPermissions
 import java.util.*
 import kotlin.collections.ArrayList
 
-class MainActivity : AppCompatActivity() {
-    private val REQUEST_ENABLE_BT = 160
+lateinit var commonHeaderClass: HeaderClass
 
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -50,7 +50,8 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.BLUETOOTH_ADMIN,
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.INTERNET
+            Manifest.permission.INTERNET,
+            Manifest.permission.FOREGROUND_SERVICE
         )
 
         if(!EasyPermissions.hasPermissions(this, *permissions)){
@@ -59,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val DB = DatabaseHelper(this)
-        val bluetooth = BluetoothClass(this, DB)
+        val bluetooth = BluetoothClass(this)
         val server = RailsServer()
 
         DB.existDB()
@@ -140,7 +141,6 @@ class RailsServer(){
     private val SIGN_UP_URL: String = "auth"
     private val LOG_CREATE_URL: String = "log"
     private val HTTP_CONFRICT = 409
-    lateinit var header: HeaderClass
 
     private fun postJson(URL: String, body: String, head: HashMap<String, String> = hashMapOf("Content-Type" to "application/json")): ResponseResultOf<ByteArray> {
         return runBlocking(Dispatchers.Default) {
@@ -183,7 +183,7 @@ class RailsServer(){
                     serverData["name"].toString(),
                     serverData["ble_token"].toString()
                 )
-                this.header = headerClass
+                commonHeaderClass = headerClass
                 Triple(true, userClass, hashMapOf("" to ""))
             }
             is Result.Failure -> {
@@ -206,7 +206,7 @@ class RailsServer(){
         when(result){
             is Result.Success -> {
                 DB.saveUser(user)
-                this.header = headerClass
+                commonHeaderClass = headerClass
                 return Triple(true, user, hashMapOf("" to ""))
             }
             is Result.Failure -> {
@@ -232,11 +232,36 @@ class RailsServer(){
             }
         }
     }
+
+    fun createLog(bleToken: String, RSSI: Int, txPower: Int){
+        val head: HashMap<String, String> = hashMapOf(
+            "Content-Type" to "application/json",
+            "uid" to commonHeaderClass.uid!!,
+            "access-token" to commonHeaderClass.token!!,
+            "client" to commonHeaderClass.client!!
+        )
+        val body = Gson().toJson(
+            hashMapOf(
+                "log" to hashMapOf(
+                    "detected_ble_token" to bleToken,
+                    "rssi" to RSSI,
+                    "txpower" to txPower
+                )
+            )
+        )
+        val (_, response, result) = this.postJson(
+            LOG_CREATE_URL,
+            body,
+            head
+        )
+        commonHeaderClass = HeaderClass(response)
+    }
 }
 
-class BluetoothClass(val context: Context, val DB: DatabaseHelper){
+class BluetoothClass(private val context: Context){
     private val SERVICE_UUID = ParcelUuid(UUID.fromString("895D1816-CC8A-40E3-B5FC-42D8ED441E50"))
     private val DATA_UUID    = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
+    private val DB = DatabaseHelper(context)
     val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     val BT_NOT_SUPPORTED  = -3
@@ -321,6 +346,8 @@ class HeaderClass(response: Response){
 
 class BleScanReceiver : BroadcastReceiver() {
     private val DATA_UUID = ParcelUuid(UUID.fromString("00004376-0000-1000-8000-00805F9B34FB"))
+    private val server = RailsServer()
+
     override fun onReceive(context: Context?, intent: Intent?) {
         val error = intent!!.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, -1)
         if (error != -1) {
@@ -330,8 +357,13 @@ class BleScanReceiver : BroadcastReceiver() {
         val scanResults: ArrayList<ScanResult> = intent!!.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT)!!
         for (scanResult in scanResults) {
             scanResult.let {
-                val bleTokenData = scanResult.scanRecord!!.serviceData[DATA_UUID]!!.toString(Charsets.UTF_8)
-                Toast.makeText(context, "Detected : $bleTokenData", Toast.LENGTH_SHORT).show()
+                var bleTokenData = scanResult.scanRecord!!.serviceData[DATA_UUID]!!.toString(Charsets.UTF_8)
+                var rssi = scanResult.rssi
+                var txPower = scanResult.txPower
+                server.createLog(bleTokenData, rssi, txPower)
+                Toast.makeText(context, "Detected : $bleTokenData \n" +
+                        "RSSI : $rssi\n" +
+                        "TxPower: $txPower", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -353,8 +385,7 @@ class BleScanService : Service(){
         )
         val service = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val context = applicationContext
-        val DB = DatabaseHelper(context)
-        val bluetooth = BluetoothClass(context, DB)
+        val bluetooth = BluetoothClass(context)
 
         channel.description = "Silent Notification"
         channel.setSound(null,null)
@@ -375,6 +406,11 @@ class BleScanService : Service(){
         startForeground(101, notification)
 
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopSelf()
     }
 }
 
